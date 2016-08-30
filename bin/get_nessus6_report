@@ -1,77 +1,100 @@
 #!/usr/bin/env ruby
 #encoding: UTF-8
 
+# Distributed under MIT Licence
+# MIT License
+
+# Copyright (c) Sebastien Delcroix 2016 
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 require 'net/http'
 require 'json'
 require 'openssl'
 
 class Nessus6
 
-	SLEEP_TIME = 5
+    SLEEP_TIME = 5
 
-	def initialize(hostname,port,username,password)
-		@hostname = hostname
-		@port = port
-		@username = username
-		@password = password
-		@token = nil
-		@https_cnct = Net::HTTP.new(@hostname, @port)	
-		@https_cnct.use_ssl = true				
-		@https_cnct.verify_mode = OpenSSL::SSL::VERIFY_NONE
-		auth
-	end
+    def initialize(hostname,port,username,password)
+        @hostname = hostname
+        @port = port
+        @username = username
+        @password = password
+        @token = nil
+        @https_cnct = Net::HTTP.new(@hostname, @port)   
+        @https_cnct.use_ssl = true              
+        @https_cnct.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        auth
+    end
 
-	def getReport(scan_id,format,dest_dir=".")
+    def getReport(scan_id,format,dest_dir=".")
 
-		http_headers = {
-							"X-Cookie" => "token=#{@token}",
-							"Content-Type" => 'application/json'
-						}
+        http_headers = {
+                            "X-Cookie" => "token=#{@token}",
+                            "Content-Type" => 'application/json'
+                        }
 
-		response = @https_cnct.post(
-									"/scans/#{scan_id}/export", 
-									{
-										'format' => format,
-										'chapters' => "vuln_hosts_summary;vuln_by_plugin;vuln_by_host;remediations;"
-									}.to_json,
-									http_headers
-									)
-		file_id = JSON.parse(response.body)['file']
-			
-		while true
-			status = JSON.parse(@https_cnct.get("/scans/#{scan_id}/export/#{file_id}/status", http_headers).body)['status']
-			case status
-			when "ready"
-				break
-			when "loading"
-				puts "status=#{status}, sleeping #{SLEEP_TIME}s"
-				sleep SLEEP_TIME
-			when "error"
-				break
-			end
-		end
+        response = @https_cnct.post(
+                                    "/scans/#{scan_id}/export", 
+                                    {
+                                        'format' => format,
+                                        'chapters' => "vuln_hosts_summary;vuln_by_plugin;vuln_by_host;remediations;"
+                                    }.to_json,
+                                    http_headers
+                                    )
+        file_id = JSON.parse(response.body)['file']
+            
+        while true
+            status = JSON.parse(@https_cnct.get("/scans/#{scan_id}/export/#{file_id}/status", http_headers).body)['status']
+            case status
+            when "ready"
+                break
+            when "loading"
+                puts "status=#{status}, sleeping #{SLEEP_TIME}s"
+                sleep SLEEP_TIME
+            when "error"
+                break
+            end
+        end
 
-		download = @https_cnct.get("/scans/#{scan_id}/export/#{file_id}/download", http_headers)
-		dest_filename = dest_dir+"/"+download.response["Content-Disposition"].split('"')[1]
-		open(dest_filename, 'w') do |fd|
-			fd.write(download.body)
-		end
+        download = @https_cnct.get("/scans/#{scan_id}/export/#{file_id}/download", http_headers)
+        dest_filename = dest_dir+"/"+download.response["Content-Disposition"].split('"')[1]
+        open(dest_filename, 'w') do |fd|
+            fd.write(download.body)
+        end
 
 
-	end
+    end
 
-	private
+    private
 
-	def auth
+    def auth
 
-		begin
-			response = @https_cnct.post('/session', {'username' => @username, 'password' => @password }.to_json, 'Content-Type' => 'application/json')
-			@token = JSON.parse(response.body)['token']
-		rescue StandardError => get_token_error
-			puts "\n\nError logging in/getting token: #{get_token_error}\n\n"
-		end
+        begin
+            response = @https_cnct.post('/session', {'username' => @username, 'password' => @password }.to_json, 'Content-Type' => 'application/json')
+            @token = JSON.parse(response.body)['token']
+        rescue StandardError => get_token_error
+            puts "\n\nError logging in/getting token: #{get_token_error}\n\n"
+        end
 
-	end
+    end
 
 end
 
