@@ -1,0 +1,87 @@
+#!/usr/bin/env ruby
+#encoding: UTF-8
+
+require 'net/http'
+require 'json'
+require 'openssl'
+
+class Nessus6
+
+	SLEEP_TIME = 5
+
+	def initialize(hostname,port,username,password)
+		@hostname = hostname
+		@port = port
+		@username = username
+		@password = password
+		@token = nil
+		@https_cnct = Net::HTTP.new(@hostname, @port)	
+		@https_cnct.use_ssl = true				
+		@https_cnct.verify_mode = OpenSSL::SSL::VERIFY_NONE
+		auth
+	end
+
+	def getReport(scan_id,format,dest_dir=".")
+
+		http_headers = {
+							"X-Cookie" => "token=#{@token}",
+							"Content-Type" => 'application/json'
+						}
+
+		response = @https_cnct.post(
+									"/scans/#{scan_id}/export", 
+									{
+										'format' => format,
+										'chapters' => "vuln_hosts_summary;vuln_by_plugin;vuln_by_host;remediations;"
+									}.to_json,
+									http_headers
+									)
+		file_id = JSON.parse(response.body)['file']
+			
+		while true
+			status = JSON.parse(@https_cnct.get("/scans/#{scan_id}/export/#{file_id}/status", http_headers).body)['status']
+			case status
+			when "ready"
+				break
+			when "loading"
+				puts "status=#{status}, sleeping #{SLEEP_TIME}s"
+				sleep SLEEP_TIME
+			when "error"
+				break
+			end
+		end
+
+		download = @https_cnct.get("/scans/#{scan_id}/export/#{file_id}/download", http_headers)
+		dest_filename = dest_dir+"/"+download.response["Content-Disposition"].split('"')[1]
+		open(dest_filename, 'w') do |fd|
+			fd.write(download.body)
+		end
+
+
+	end
+
+	private
+
+	def auth
+
+		begin
+			response = @https_cnct.post('/session', {'username' => @username, 'password' => @password }.to_json, 'Content-Type' => 'application/json')
+			@token = JSON.parse(response.body)['token']
+		rescue StandardError => get_token_error
+			puts "\n\nError logging in/getting token: #{get_token_error}\n\n"
+		end
+
+	end
+
+end
+
+hostname = ARGV.shift
+port = ARGV.shift
+username = ARGV.shift
+password = ARGV.shift
+scan_id = ARGV.shift
+type = ARGV.shift
+dest_path = ARGV.shift
+
+nessus = Nessus6.new(hostname,port,username,password)
+nessus.getReport(scan_id,type,dest_path)
