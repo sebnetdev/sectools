@@ -12,6 +12,13 @@ then
     GREP=ggrep # brew install grep
 fi
 
+
+errorMSG()
+{
+    local msg="$1"
+    echo -ne "$msg" 1>&2
+}
+
 checkCert()
 {
     local host=$1
@@ -19,16 +26,39 @@ checkCert()
 
     local ip=$(host "$host" | grep "has add" | awk '{print $4}')
 
-    local hostname=$(host $ip | awk '{print $5}')
+    local hostname
+
+    if [[ -z "$ip" ]]
+    then
+        hostname=""
+        errorMSG "$ip not found for '$host\n"
+    else
+        hostname=$(host $ip | awk '{print $5}')
+    fi
 
     local servername
 
-    for servername in $host $hostname 
+    for servername in "$host" "$hostname" 
     do
-        echo "check-cert:$host:$port:$servername" >  check-cert-$host-$port-$servername.txt
-        echo "====================================" >> check-cert-$host-$port-$servername.txt
-        echo | openssl s_client -servername $servername -connect $host:$port 2>/dev/null | openssl x509 -text -noout >> check-cert-$host-$port-$servername.txt
-        #echo | openssl s_client -connect $host:$port 2>/dev/null | openssl x509 -text -noout
+        if [[ -z "$servername" ]]
+        then
+            errorMSG "check-cert:$host:$port:$servername, skipped can't resolve\n"
+            continue
+        fi
+
+        if [[ -e check-cert-$host-$port-$servername.txt ]]
+        then
+            echo "check-cert:$host:$port:$servername, skipped already exists, remove it manually to process it" 1>&2
+        else
+            echo "check-cert:$host:$port:$servername" >  check-cert-$host-$port-$servername.txt
+            echo "====================================" >> check-cert-$host-$port-$servername.txt
+            if [[ $os_type = "Darwin" ]]
+            then
+                echo | openssl s_client -servername $servername -connect $host:$port 2>/dev/null | openssl x509 -text -noout 2> /dev/null >> check-cert-$host-$port-$servername.txt
+            else
+                timeout openssl s_client -servername $servername -connect $host:$port 2>/dev/null | openssl x509 -text -noout 2> /dev/null >> check-cert-$host-$port-$servername.txt
+            fi
+        fi
     done
 }
 
@@ -40,10 +70,16 @@ gatherCert()
         host=$(echo "$data" | cut -d ":" -f 1)
         port=$(echo "$data" | cut -d ":" -f 2)
 
-        echo "processing $host:$port" 1>&2
+        errorMSG "processing $host:$port\n"
 
         checkCert $host $port
     done
+}
+
+convertDate()
+{
+    local date="$1"
+    ruby -e 'require "date" ; puts DateTime.parse(ARGV.shift).iso8601' "$date"
 }
 
 
@@ -60,33 +96,48 @@ supplast()
 
 extractData()
 {
-    echo -n "extract data from cert files" 1>&2
+    errorMSG "extract data from cert files\n"
     echo "host;port;servername;subject;san;issuer;date_from;date_to;key_length;pub_key_algo;sig_algo;serial_number"
     for i in check-cert-*.txt
     do
+        errorMSG "  -> processing '$i' ... "
+        size_l=$(wc -l "$i" | awk '{print $1}')
+
+        if [[ $size_l -lt 4 ]]
+        then
+            errorMSG "skipped => no information found\n" 
+            continue
+        fi
+
         host=$($GREP -P "^check-cert:"  "$i" | cut -d ":" -f 2)
         port=$($GREP -P "^check-cert:" "$i" | cut -d ":" -f 3)
         servername=$($GREP -P "^check-cert:" "$i" | cut -d ":" -f 4)
         issuer=$($GREP "Issuer:"  "$i" | formatData)
         date_from=$($GREP "Not Before:"  "$i" | formatData)
+        date_from=$(convertDate "$date_from")
         date_to=$($GREP "Not After :"  "$i" | formatData)
+        date_to=$(convertDate "$date_to")
         key_length=$($GREP "Public-Key:"  "$i" | formatData | tr -d "()" | cut -d " " -f 1)
         pub_key_algo=$($GREP "Public Key Algorithm:" "$i" | formatData)
         subject=$($GREP "Subject:" "$i" | formatData)
         sig_algo=$($GREP "Signature Algorithm:" "$i" | formatData| head -1)
         serial_number=$($GREP -A1 "Serial Number:" "$i" | $GREP -v "Serial Number:" |tr -d " ")
-        san=$($GREP -A100 "X509v3 Subject Alternative Name:" "$i" | $GREP "DNS:" | formatData | tr "\n" "," | supplast ",")
+        san=$($GREP -A100 "X509v3 Subject Alternative Name:" "$i" | $GREP "DNS:" | formatData | sed -e 's/ DNS://g' | tr "\n" "," | supplast ",")
         echo "$host;$port;$servername;\"$subject\";$san;\"$issuer\";$date_from;$date_to;$key_length;$pub_key_algo;$sig_algo;$serial_number"
+        errorMSG "done\n"    
     done
 
-    echo " done" 1>&2
+    errorMSG "done!!!\n"
+
+    
 }
 
 
 
-filename="$1"
-shift
+
 action="$1"
+shift
+filename="$1"
 
 case "$action" in
 
@@ -95,6 +146,7 @@ case "$action" in
         ;;
 
     gather)
+
         gatherCert "$filename"
         ;;
 
@@ -104,7 +156,7 @@ case "$action" in
         ;;
 
     *)
-        echo "$(basename $0) filename action
+        echo "$(basename $0) action [filename]
   - action:
     . extract: extract data for gathered information
     . gather: gather certificate
