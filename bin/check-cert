@@ -1,0 +1,113 @@
+#!/bin/bash
+
+
+# X-MIT Licence // Copyright (C) Sebastien Delcroix dev[at]sebnet[dot]org
+
+os_type=$(uname)
+
+GREP=grep
+
+if [[ $os_type = "Darwin" ]]
+then
+    GREP=ggrep # brew install grep
+fi
+
+checkCert()
+{
+    local host=$1
+    local port=$2
+
+    local ip=$(host sebnet.org | grep "has add" | awk '{print $4}')
+
+    local hostname=$(host $ip | awk '{print $5}')
+
+    local servername
+
+    for servername in $host $hostname 
+    do
+        echo "check-cert:$host:$port:$servername" >  check-cert-$host-$port-$servername.txt
+        echo "====================================" >> check-cert-$host-$port-$servername.txt
+        echo | openssl s_client -servername $servername -connect $host:$port 2>/dev/null | openssl x509 -text -noout >> check-cert-$host-$port-$servername.txt
+        #echo | openssl s_client -connect $host:$port 2>/dev/null | openssl x509 -text -noout
+    done
+}
+
+
+gatherCert()
+{
+    for data in $(cat $1)
+    do
+        host=$(echo "$data" | cut -d ":" -f 1)
+        port=$(echo "$data" | cut -d ":" -f 2)
+
+        echo "processing $host:$port" 1>&2
+
+        checkCert $host $port
+    done
+}
+
+
+formatData()
+{
+    perl -pe '{ s/^[^:]+: ?(.*)$/\1/g }';
+}
+
+supplast() 
+{
+    str="$1"
+    perl -pe '{ s/^(.*)'$str'$/\1/g }'; 
+}
+
+extractData()
+{
+    echo -n "extract data from cert files" 1>&2
+    echo "host;port;servername;subject;san;issuer;date_from;date_to;key_length;pub_key_algo;sig_algo;serial_number"
+    for i in check-cert-*.txt
+    do
+        host=$($GREP -P "^check-cert:"  "$i" | cut -d ":" -f 2)
+        port=$($GREP -P "^check-cert:" "$i" | cut -d ":" -f 3)
+        servername=$($GREP -P "^check-cert:" "$i" | cut -d ":" -f 4)
+        issuer=$($GREP "Issuer:"  "$i" | formatData)
+        date_from=$($GREP "Not Before:"  "$i" | formatData)
+        date_to=$($GREP "Not After :"  "$i" | formatData)
+        key_length=$($GREP "Public-Key:"  "$i" | formatData | tr -d "()" | cut -d " " -f 1)
+        pub_key_algo=$($GREP "Public Key Algorithm:" "$i" | formatData)
+        subject=$($GREP "Subject:" "$i" | formatData)
+        sig_algo=$($GREP "Signature Algorithm:" "$i" | formatData| head -1)
+        serial_number=$($GREP -A1 "Serial Number:" "$i" | $GREP -v "Serial Number:" |tr -d " ")
+        san=$($GREP -A100 "X509v3 Subject Alternative Name:" "$i" | $GREP "DNS:" | formatData | tr "\n" "," | supplast ",")
+        echo "$host;$port;$servername;\"$subject\";$san;\"$issuer\";$date_from;$date_to;$key_length;$pub_key_algo;$sig_algo;$serial_number"
+    done
+
+    echo " done" 1>&2
+}
+
+
+
+filename="$1"
+shift
+action="$1"
+
+case "$action" in
+
+    extract)
+        extractData
+        ;;
+
+    gather)
+        gatherCert "$filename"
+        ;;
+
+    all)
+        gatherCert "$filename"
+        extractData
+        ;;
+
+    *)
+        echo "$(basename $0) filename action
+  - action:
+    . extract: extract data for gathered information
+    . gather: gather certificate
+    . all: gather + extract"
+
+esac
