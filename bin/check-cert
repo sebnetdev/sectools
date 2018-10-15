@@ -34,7 +34,7 @@ checkCert()
         errorMSG "$ip not found for '$host\n"
     else
         hostname=$(host $ip | awk '{print $5}')
-        if $GREP "(NXDOMAIN)" <<< "$hostname"
+        if $GREP -q "(NXDOMAIN)" <<< "$hostname"
         then
             hostname=""
         fi
@@ -133,7 +133,7 @@ extractData()
         subject=$($GREP "Subject:" "$i" | formatData)
         sig_algo=$($GREP "Signature Algorithm:" "$i" | formatData| head -1)
 
-        if $GREP -P '^\s*Serial Number:\s*$' <<< $($GREP "Serial Number:" "$i")
+        if $GREP -qP '^\s*Serial Number:\s*$' <<< $($GREP "Serial Number:" "$i")
         then
             serial_number=$($GREP -A1 "Serial Number:" "$i" | $GREP -v "Serial Number:" |tr -d " ")
         else
