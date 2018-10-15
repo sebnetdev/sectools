@@ -34,6 +34,10 @@ checkCert()
         errorMSG "$ip not found for '$host\n"
     else
         hostname=$(host $ip | awk '{print $5}')
+        if $GREP "(NXDOMAIN)" <<< "$hostname"
+        then
+            hostname=""
+        fi
     fi
 
     local servername
