@@ -17,7 +17,7 @@ checkCert()
     local host=$1
     local port=$2
 
-    local ip=$(host sebnet.org | grep "has add" | awk '{print $4}')
+    local ip=$(host "$host" | grep "has add" | awk '{print $4}')
 
     local hostname=$(host $ip | awk '{print $5}')
 
