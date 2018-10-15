@@ -65,14 +65,21 @@ checkCert()
 
 gatherCert()
 {
-    for data in $(cat $1)
+    local filename="$1"
+
+    local count=1
+    local max=$(wc -l "$filename" | awk '{print $1}')
+
+    for data in $(cat "$filename")
     do
         host=$(echo "$data" | cut -d ":" -f 1)
         port=$(echo "$data" | cut -d ":" -f 2)
 
-        errorMSG "processing $host:$port\n"
+        errorMSG "processing [$count/$max] $host:$port\n"
 
         checkCert $host $port
+
+        count=$(($count + 1))
     done
 }
 
